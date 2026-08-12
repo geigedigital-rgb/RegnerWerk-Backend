@@ -1,0 +1,54 @@
+@import "tailwindcss";
+
+:root {
+  --rw-forest: #0b2414;
+  --rw-forest-mid: #14352b;
+  --rw-lime: #00ffcf;
+  --rw-lime-hover: #00d9b0;
+  --rw-aqua-deep: #0a9f86;
+  --rw-mint: #eafcf7;
+  --rw-ice: #f3fafc;
+  --rw-white: #ffffff;
+  --rw-gray-50: #f7fbfa;
+  --rw-gray-100: #ddeae6;
+  --rw-gray-400: #7a948c;
+  --rw-gray-600: #4d655c;
+  --rw-gold: #e8b84a;
+  --background: var(--rw-gray-50);
+  --foreground: var(--rw-forest);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-forest: var(--rw-forest);
+  --color-forest-mid: var(--rw-forest-mid);
+  --color-lime: var(--rw-lime);
+  --color-lime-hover: var(--rw-lime-hover);
+  --color-aqua-deep: var(--rw-aqua-deep);
+  --color-mint: var(--rw-mint);
+  --color-ice: var(--rw-ice);
+  --color-rw-white: var(--rw-white);
+  --color-gray-50: var(--rw-gray-50);
+  --color-gray-100: var(--rw-gray-100);
+  --color-gray-400: var(--rw-gray-400);
+  --color-gray-600: var(--rw-gray-600);
+  --color-gold: var(--rw-gold);
+  --font-sans: var(--font-plus-jakarta);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-plus-jakarta), system-ui, sans-serif;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--rw-lime) 40%, white);
+  color: var(--rw-forest);
+}
+
+:focus-visible {
+  outline: 2px solid var(--rw-lime);
+  outline-offset: 2px;
+}
