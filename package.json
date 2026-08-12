@@ -1,0 +1,12 @@
+{
+  "name": "regnerwerk-backend-monorepo",
+  "private": true,
+  "description": "Default Railway service = voice-gateway (OpenAI webhook). Admin: set Root Directory to RegnerWerk-Backend.",
+  "scripts": {
+    "build": "npm ci --prefix voice-gateway",
+    "start": "npm run start --prefix voice-gateway"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

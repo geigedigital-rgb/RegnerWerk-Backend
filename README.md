@@ -6,21 +6,26 @@
 | `voice-gateway/` | OpenAI Realtime SIP + Twilio | `:8000` |
 | `supabase/` | SQL migrations | — |
 
-## Voice Gateway on Railway
+## Railway
 
-1. New Railway service → connect this GitHub repo
-2. **Root Directory:** `voice-gateway`
-3. Set variables (Dashboard → Variables), **do not commit secrets**:
-   - `OPENAI_API_KEY`
-   - `OPENAI_WEBHOOK_SECRET` (from OpenAI webhook after create)
-   - `ADMIN_API_URL` (prod admin URL when ready)
-   - optional: `OPENAI_SIP_URI`, `VOICE_GATEWAY_SECRET`, transfer E.164, Supabase
-4. Public URL for OpenAI webhook:
+**Default deploy (repo root)** = `voice-gateway` via root `package.json` + `railway.toml`.
+
+| Service | Root Directory | Port / notes |
+|---------|----------------|--------------|
+| Voice Gateway (default) | `/` or `voice-gateway` | `/health`, `/openai/webhook` |
+| Admin Next.js | `RegnerWerk-Backend` | set `PORT` / Next start |
+
+### Voice Gateway variables (do not commit)
+
+- `OPENAI_API_KEY`
+- `OPENAI_WEBHOOK_SECRET` (from OpenAI webhook after create)
+- `ADMIN_API_URL` (prod admin URL when ready)
+- optional: `OPENAI_SIP_URI`, `VOICE_GATEWAY_SECRET`, transfer E.164, Supabase
+
+OpenAI webhook URL:
 
 ```text
 https://<your-railway-domain>/openai/webhook
 ```
 
-Event type: `realtime.call.incoming`
-
-Health: `GET /health`
+Event: `realtime.call.incoming` · Health: `GET /health`
