@@ -1,11 +1,25 @@
 import { NextRequest, NextResponse } from "next/server";
 
+const DEFAULT_ORIGINS = [
+  "http://localhost:3000",
+  "http://localhost:3002",
+  "https://konfigurator.regnerwerk.de",
+  "https://www.regnerwerk.de",
+  "https://regnerwerk.de",
+];
+
 function allowedOrigins(): string[] {
-  const raw = process.env.ALLOWED_ORIGINS ?? "http://localhost:3000";
-  return raw
+  const fromEnv = (process.env.ALLOWED_ORIGINS ?? "")
     .split(",")
-    .map((s) => s.trim())
+    .map((s) => s.trim().replace(/\/$/, ""))
     .filter(Boolean);
+  const extras = [
+    process.env.FRONTEND_URL,
+    process.env.NEXT_PUBLIC_FRONTEND_URL,
+  ]
+    .map((s) => s?.trim().replace(/\/$/, "") ?? "")
+    .filter(Boolean);
+  return [...new Set([...DEFAULT_ORIGINS, ...fromEnv, ...extras])];
 }
 
 export function corsHeaders(req: NextRequest): HeadersInit {
