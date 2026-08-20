@@ -7,7 +7,7 @@
     "dev:gateway": "npm run dev --prefix ../voice-gateway",
     "dev:all": "npm run dev & npm run dev:gateway",
     "build": "next build",
-    "start": "next start -p 3001",
+    "start": "next start --hostname 0.0.0.0",
     "lint": "eslint"
   },
   "dependencies": {
