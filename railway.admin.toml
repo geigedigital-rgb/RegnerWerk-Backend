@@ -1,0 +1,11 @@
+# Railway service "Admin" — keep Root Directory empty (/), use these monorepo commands.
+[build]
+builder = "NIXPACKS"
+buildCommand = "npm ci --prefix RegnerWerk-Backend && npm run build --prefix RegnerWerk-Backend"
+
+[deploy]
+startCommand = "npm run start --prefix RegnerWerk-Backend"
+healthcheckPath = "/login"
+healthcheckTimeout = 180
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 5
