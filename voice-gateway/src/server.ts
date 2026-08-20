@@ -19,17 +19,29 @@ import {
   preloadTelephonyRuntime,
 } from "./modules/telephony-runtime.js";
 import { selectTransferTarget } from "./modules/transfer.js";
+import {
+  answerCall,
+  openaiSipConfigured,
+  parseTelnyxEvent,
+  telnyxConfigured,
+  transferToSip,
+} from "./modules/telnyx.js";
 
 dotenv.config();
 
 const PORT = Number(process.env.PORT ?? 8000);
-const VERSION = "0.1.0-skeleton";
+const VERSION = "0.2.0-telnyx";
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY?.trim();
 const OPENAI_WEBHOOK_SECRET = process.env.OPENAI_WEBHOOK_SECRET?.trim();
+const OPENAI_SIP_URI = process.env.OPENAI_SIP_URI?.trim();
+const TELNYX_PHONE = process.env.TELNYX_PHONE_NUMBER?.trim() || null;
+const TELNYX_CONNECTION_ID = process.env.TELNYX_CONNECTION_ID?.trim() || null;
 
 /** Dev mode: health works without keys; webhooks require keys. */
 const openaiReady = Boolean(OPENAI_API_KEY && OPENAI_WEBHOOK_SECRET);
+const telnyxReady = telnyxConfigured();
+const sipReady = openaiSipConfigured();
 
 async function main() {
   const fastify = fastifyFactory({ logger: true });
@@ -62,6 +74,12 @@ async function main() {
       activeCalls: activeCallTasks.size,
       version: VERSION,
       openaiConfigured: openaiReady,
+      telnyxConfigured: telnyxReady,
+      openaiSipConfigured: sipReady,
+      telnyxPhone: TELNYX_PHONE,
+      telnyxConnectionId: TELNYX_CONNECTION_ID,
+      webhookTelnyx: "/api/webhooks/telnyx",
+      webhookOpenAI: "/openai/webhook",
       pilotMode: runtime?.pilotMode ?? "unknown",
       recordingEnabled: runtime?.recordingEnabled ?? false,
     };
@@ -294,8 +312,116 @@ async function main() {
   });
 
   /**
-   * Twilio Programmable Voice webhook skeleton (Stage 5).
-   * Production: TwiML SIP dial to OpenAI Realtime; here we acknowledge + log.
+   * Telnyx Call Control API v2 webhook.
+   * Inbound DID → answer → transfer to OPENAI_SIP_URI → OpenAI fires /openai/webhook.
+   * Path matches Mission Control: …/api/webhooks/telnyx
+   */
+  fastify.post("/api/webhooks/telnyx", async (request, reply) => {
+    const parsed = parseTelnyxEvent(request.body);
+    fastify.log.info(
+      {
+        eventType: parsed.eventType,
+        callControlId: parsed.callControlId,
+        from: parsed.from,
+        to: parsed.to,
+        direction: parsed.direction,
+      },
+      "Telnyx webhook",
+    );
+
+    if (!parsed.eventType) {
+      reply.status(400).send({ error: "Missing event_type" });
+      return;
+    }
+
+    // Always ACK quickly; work after for answer/transfer.
+    if (
+      parsed.eventType === "call.initiated" &&
+      parsed.direction === "incoming" &&
+      parsed.callControlId
+    ) {
+      const callControlId = parsed.callControlId;
+      const runtime = await loadTelephonyRuntime();
+
+      await createCallRecord({
+        openaiCallId: `telnyx:${callControlId}`,
+        fromNumber: parsed.from ?? undefined,
+        toNumber: parsed.to ?? undefined,
+      });
+
+      if (runtime.pilotMode === "off") {
+        fastify.log.warn(`Pilot off — rejecting Telnyx call ${callControlId}`);
+        await updateCallLifecycle({
+          openaiCallId: `telnyx:${callControlId}`,
+          event: "failed",
+          errorCode: "pilot_off",
+          outcome: "failed",
+        });
+        reply.status(200).send({ ok: true, accepted: false, reason: "pilot_off" });
+        return;
+      }
+
+      if (!telnyxReady) {
+        reply.status(503).send({ error: "TELNYX_API_KEY not configured" });
+        return;
+      }
+
+      if (!OPENAI_SIP_URI) {
+        fastify.log.error("OPENAI_SIP_URI missing — cannot bridge to Realtime");
+        await updateCallLifecycle({
+          openaiCallId: `telnyx:${callControlId}`,
+          event: "failed",
+          errorCode: "missing_openai_sip_uri",
+          outcome: "failed",
+        });
+        reply.status(200).send({
+          ok: false,
+          reason: "missing_openai_sip_uri",
+        });
+        return;
+      }
+
+      try {
+        await answerCall(callControlId);
+        await transferToSip(callControlId, OPENAI_SIP_URI, parsed.to ?? undefined);
+        await updateCallLifecycle({
+          openaiCallId: `telnyx:${callControlId}`,
+          event: "accepted",
+          summary: "Telnyx answered → transferred to OpenAI SIP",
+        });
+        reply.status(200).send({ ok: true, accepted: true });
+      } catch (error) {
+        fastify.log.error({ err: error }, `Telnyx answer/transfer failed ${callControlId}`);
+        await updateCallLifecycle({
+          openaiCallId: `telnyx:${callControlId}`,
+          event: "failed",
+          errorCode: "telnyx_bridge_failed",
+          outcome: "failed",
+        });
+        reply.status(200).send({
+          ok: false,
+          reason: "telnyx_bridge_failed",
+          message: error instanceof Error ? error.message : "unknown",
+        });
+      }
+      return;
+    }
+
+    if (parsed.eventType === "call.hangup" && parsed.callControlId) {
+      await updateCallLifecycle({
+        openaiCallId: `telnyx:${parsed.callControlId}`,
+        event: "ended",
+        outcome: "disconnected",
+        errorCode: parsed.hangupCause ?? undefined,
+      });
+    }
+
+    reply.status(200).send({ ok: true });
+  });
+
+  /**
+   * Twilio Programmable Voice webhook skeleton (legacy / fallback).
+   * Production path is Telnyx → OpenAI SIP.
    */
   fastify.post("/twilio/voice", async (request, reply) => {
     const body = (request.body ?? {}) as Record<string, string>;

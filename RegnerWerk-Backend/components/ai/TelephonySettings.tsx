@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Loader2, Save } from "lucide-react";
+import { Check, Copy, Loader2, Save, X } from "lucide-react";
 import {
   Flash,
   OpsPage,
@@ -17,8 +17,66 @@ function asText(v: unknown): string {
   return String(v);
 }
 
+type Connections = {
+  gatewayOnline?: boolean;
+  openai?: boolean;
+  openaiSip?: boolean;
+  telnyx?: boolean;
+  telnyxPhone?: string | null;
+  telnyxConnectionId?: string | null;
+  webhookTelnyx?: string;
+  webhookOpenAI?: string;
+  secretsNote?: string;
+};
+
+function StatusDot({ ok, label, hint }: { ok: boolean; label: string; hint: string }) {
+  return (
+    <div className="flex items-start gap-3 rounded-2xl border border-gray-100 bg-ice px-3 py-3">
+      <span
+        className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full ${
+          ok ? "bg-lime text-forest" : "bg-amber-100 text-amber-800"
+        }`}
+      >
+        {ok ? <Check size={12} strokeWidth={3} /> : <X size={12} strokeWidth={3} />}
+      </span>
+      <div className="min-w-0">
+        <p className="text-sm font-medium text-forest">{label}</p>
+        <p className="text-[11px] text-gray-500">{hint}</p>
+      </div>
+    </div>
+  );
+}
+
+function CopyRow({ label, value }: { label: string; value: string }) {
+  const [copied, setCopied] = useState(false);
+  if (!value) return null;
+  return (
+    <div className="flex items-center gap-2 rounded-2xl border border-gray-100 bg-white px-3 py-2">
+      <div className="min-w-0 flex-1">
+        <p className="text-[10px] font-medium uppercase tracking-wide text-gray-400">
+          {label}
+        </p>
+        <p className="truncate font-mono text-xs text-forest">{value}</p>
+      </div>
+      <button
+        type="button"
+        className="shrink-0 rounded-full p-2 text-gray-400 hover:bg-ice hover:text-forest"
+        onClick={async () => {
+          await navigator.clipboard.writeText(value);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        }}
+        aria-label="Kopieren"
+      >
+        {copied ? <Check size={14} /> : <Copy size={14} />}
+      </button>
+    </div>
+  );
+}
+
 export function TelephonySettings() {
   const [gateway, setGateway] = useState<Record<string, unknown>>({});
+  const [connections, setConnections] = useState<Connections>({});
   const [pilotMode, setPilotMode] = useState("after_hours");
   const [testNumber, setTestNumber] = useState("");
   const [officeTransfer, setOfficeTransfer] = useState("");
@@ -37,9 +95,15 @@ export function TelephonySettings() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Laden fehlgeschlagen");
       setGateway(data.gateway ?? {});
+      setConnections(data.connections ?? {});
       const s = data.settings ?? {};
       setPilotMode(asText(s.pilot_mode) || "after_hours");
-      setTestNumber(asText(s.test_number_e164));
+      setTestNumber(
+        asText(s.production_number_e164) ||
+          asText(s.test_number_e164) ||
+          asText(data.connections?.telnyxPhone) ||
+          "",
+      );
       setOfficeTransfer(asText(s.transfer_office_e164));
       setEmergencyTransfer(asText(s.transfer_emergency_e164));
     } catch (e) {
@@ -61,6 +125,7 @@ export function TelephonySettings() {
       const entries: Array<[string, unknown]> = [
         ["pilot_mode", pilotMode],
         ["test_number_e164", testNumber.trim() || null],
+        ["production_number_e164", testNumber.trim() || null],
         ["transfer_office_e164", officeTransfer.trim() || null],
       ];
       if (showAdvanced) {
@@ -94,14 +159,16 @@ export function TelephonySettings() {
     );
   }
 
-  const gwOk = gateway.status === "ok";
+  const gwOk = connections.gatewayOnline || gateway.status === "ok";
+  const ready =
+    gwOk && connections.openai && connections.openaiSip && connections.telnyx;
 
   return (
     <OpsPage>
       <PageHeader
         eyebrow="Verbindung"
         title="Telefonie"
-        description="Nur das, was für den Alltag nötig ist."
+        description="Telnyx → Voice Gateway → OpenAI Realtime. Keys nur in Railway."
         actions={
           <button
             type="button"
@@ -121,14 +188,14 @@ export function TelephonySettings() {
             value: gwOk ? "Online" : asText(gateway.status) || "Offline",
             hint: gwOk
               ? `v${asText(gateway.version)} · ${asText(gateway.activeCalls) || 0} aktiv`
-              : "localhost:8000",
+              : "Voice Gateway prüfen",
             tone: gwOk ? "ok" : "warn",
           },
           {
-            label: "OpenAI",
-            value: gateway.openaiConfigured ? "bereit" : "offen",
-            hint: "API Key / Webhook",
-            tone: gateway.openaiConfigured ? "ok" : "warn",
+            label: "Bereit",
+            value: ready ? "ja" : "nein",
+            hint: ready ? "Anrufe möglich" : "Checklist unten",
+            tone: ready ? "ok" : "warn",
           },
           {
             label: "Pilot",
@@ -146,6 +213,60 @@ export function TelephonySettings() {
 
       {error ? <Flash tone="error">{error}</Flash> : null}
       {ok ? <Flash tone="ok">{ok}</Flash> : null}
+
+      <Panel title="Verbindungen (Keys)">
+        <p className="mb-3 text-[11px] text-gray-500">
+          {connections.secretsNote ||
+            "API-Keys stehen in Railway (Voice Gateway). Hier nur Status — nichts Geheimes in der DB."}
+        </p>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <StatusDot
+            ok={Boolean(connections.telnyx)}
+            label="Telnyx API Key"
+            hint="TELNYX_API_KEY in Railway"
+          />
+          <StatusDot
+            ok={Boolean(connections.openai)}
+            label="OpenAI API + Webhook Secret"
+            hint="OPENAI_API_KEY + OPENAI_WEBHOOK_SECRET"
+          />
+          <StatusDot
+            ok={Boolean(connections.openaiSip)}
+            label="OpenAI SIP URI"
+            hint="OPENAI_SIP_URI (sip:…@…) — noch nötig für Audio"
+          />
+          <StatusDot
+            ok={gwOk}
+            label="Voice Gateway"
+            hint="Health auf Railway / localhost:8000"
+          />
+        </div>
+        <div className="mt-3 grid gap-2">
+          <CopyRow
+            label="Telnyx Webhook (Mission Control)"
+            value={connections.webhookTelnyx || ""}
+          />
+          <CopyRow
+            label="OpenAI Webhook (Dashboard)"
+            value={connections.webhookOpenAI || ""}
+          />
+          <CopyRow
+            label="Telnyx Nummer"
+            value={connections.telnyxPhone || testNumber || ""}
+          />
+          <CopyRow
+            label="Telnyx App / Connection ID"
+            value={connections.telnyxConnectionId || ""}
+          />
+        </div>
+        {!connections.openaiSip ? (
+          <p className="mt-3 rounded-2xl bg-amber-50 px-3 py-2 text-xs text-amber-900">
+            Fehlt noch: <strong>OPENAI_SIP_URI</strong> aus dem OpenAI Dashboard
+            (Realtime SIP). Ohne sie kann Telnyx den Anruf nicht zur KI
+            verbinden. Danach Key in Railway setzen und Gateway neu starten.
+          </p>
+        ) : null}
+      </Panel>
 
       <Panel title="Alltag">
         <div className="grid gap-3 sm:grid-cols-2">
@@ -166,7 +287,7 @@ export function TelephonySettings() {
           </label>
           <label className="block">
             <span className="mb-1 block text-xs font-medium text-forest">
-              Testnummer
+              Telnyx-Nummer
             </span>
             <input
               value={testNumber}
@@ -193,8 +314,8 @@ export function TelephonySettings() {
             Anrufe
           </Link>
           {" · "}
-          <Link href="/ai" className="text-aqua-deep hover:underline">
-            Übersicht
+          <Link href="/ai/einstellungen" className="text-aqua-deep hover:underline">
+            Einstellungen
           </Link>
         </p>
       </Panel>
@@ -221,7 +342,7 @@ export function TelephonySettings() {
               />
             </label>
             <pre className="mt-3 max-h-40 overflow-auto rounded-xl bg-forest/95 p-3 text-[10px] text-mint">
-              {JSON.stringify(gateway, null, 2)}
+              {JSON.stringify({ gateway, connections }, null, 2)}
             </pre>
           </Panel>
         ) : null}

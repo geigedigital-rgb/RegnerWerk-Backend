@@ -23,16 +23,52 @@ export async function GET() {
       });
       gateway = await res.json();
       gateway.httpStatus = res.status;
+      if (!("status" in gateway)) gateway.status = res.ok ? "ok" : "error";
     } catch {
       gateway = { status: "offline" };
     }
-    return NextResponse.json({ settings, gateway });
+
+    const publicGateway =
+      process.env.NEXT_PUBLIC_VOICE_GATEWAY_URL?.replace(/\/$/, "") ||
+      (gatewayUrl.includes("localhost")
+        ? "https://regnerwerk-backend-production.up.railway.app"
+        : gatewayUrl);
+
+    const connections = {
+      gatewayOnline: gateway.status === "ok",
+      openai: Boolean(gateway.openaiConfigured),
+      openaiSip: Boolean(gateway.openaiSipConfigured),
+      telnyx: Boolean(gateway.telnyxConfigured),
+      telnyxPhone:
+        (typeof gateway.telnyxPhone === "string" && gateway.telnyxPhone) ||
+        asSettingString(settings.production_number_e164) ||
+        asSettingString(settings.test_number_e164) ||
+        null,
+      telnyxConnectionId:
+        (typeof gateway.telnyxConnectionId === "string" &&
+          gateway.telnyxConnectionId) ||
+        null,
+      webhookTelnyx: `${publicGateway}/api/webhooks/telnyx`,
+      webhookOpenAI: `${publicGateway}/openai/webhook`,
+      /** Secrets live in Railway / gateway env — never returned here. */
+      secretsNote:
+        "API-Keys nur in Railway / voice-gateway .env — hier nur Status.",
+    };
+
+    return NextResponse.json({ settings, gateway, connections });
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : "Fehler" },
       { status: 500 },
     );
   }
+}
+
+function asSettingString(v: unknown): string | null {
+  if (v == null) return null;
+  if (typeof v === "string") return v || null;
+  if (typeof v === "number") return String(v);
+  return null;
 }
 
 export async function PATCH(req: NextRequest) {

@@ -3,7 +3,7 @@
 | Path | Role | Local |
 |------|------|-------|
 | `RegnerWerk-Backend/` | Admin Next.js (CRM + KI) | `:3001` |
-| `voice-gateway/` | OpenAI Realtime SIP + Twilio | `:8000` |
+| `voice-gateway/` | Telnyx Call Control + OpenAI Realtime SIP | `:8000` |
 | `supabase/` | SQL migrations | — |
 
 ## Railway
@@ -12,20 +12,29 @@
 
 | Service | Root Directory | Port / notes |
 |---------|----------------|--------------|
-| Voice Gateway (default) | `/` or `voice-gateway` | `/health`, `/openai/webhook` |
+| Voice Gateway (default) | `/` or `voice-gateway` | `/health`, `/api/webhooks/telnyx`, `/openai/webhook` |
 | Admin Next.js | `RegnerWerk-Backend` | set `PORT` / Next start |
 
 ### Voice Gateway variables (do not commit)
 
 - `OPENAI_API_KEY`
-- `OPENAI_WEBHOOK_SECRET` (from OpenAI webhook after create)
+- `OPENAI_WEBHOOK_SECRET` (OpenAI Dashboard → webhook signing secret)
+- `OPENAI_SIP_URI` (`sip:…` from OpenAI Realtime SIP)
+- `TELNYX_API_KEY`, `TELNYX_CONNECTION_ID`, `TELNYX_PHONE_NUMBER`
 - `ADMIN_API_URL` (prod admin URL when ready)
-- optional: `OPENAI_SIP_URI`, `VOICE_GATEWAY_SECRET`, transfer E.164, Supabase
+- optional: `VOICE_GATEWAY_SECRET`, transfer E.164, Supabase
 
-OpenAI webhook URL:
+Telnyx webhook (Mission Control → Voice API Application):
+
+```text
+https://<your-railway-domain>/api/webhooks/telnyx
+```
+
+OpenAI webhook:
 
 ```text
 https://<your-railway-domain>/openai/webhook
 ```
 
-Event: `realtime.call.incoming` · Health: `GET /health`
+Flow: Telnyx inbound → answer + transfer to `OPENAI_SIP_URI` → OpenAI `realtime.call.incoming` → accept on gateway.  
+Health: `GET /health`
