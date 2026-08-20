@@ -40,6 +40,12 @@ export type AssistantConfiguration = {
   model?: string;
   voice?: string;
   welcome_message?: string;
+  /** semantic_vad = natural; server_vad = silence-based */
+  vad_type?: "semantic_vad" | "server_vad";
+  vad_eagerness?: "auto" | "low" | "medium" | "high";
+  interrupt_response?: boolean;
+  silence_duration_ms?: number;
+  prefix_padding_ms?: number;
   use_active_prompt_release?: boolean;
   use_active_rule_release?: boolean;
   use_active_scenario_release?: boolean;
@@ -225,6 +231,7 @@ export async function publishAssistant(opts: {
       criticalOnly: true,
       userId: opts.userId,
     });
+    // Only block when critical scenarios exist and fail
     if (suite.criticalFailed > 0) {
       throw new Error(
         `Publish blockiert: critical Test Lab fails (${suite.criticalFailed})`,
@@ -232,7 +239,14 @@ export async function publishAssistant(opts: {
     }
   }
 
-  const config: AssistantConfiguration = { ...draft.configuration };
+  const config: AssistantConfiguration = {
+    vad_type: "semantic_vad",
+    vad_eagerness: "auto",
+    interrupt_response: true,
+    silence_duration_ms: 500,
+    prefix_padding_ms: 300,
+    ...draft.configuration,
+  };
 
   // Resolve active releases into snapshot IDs when flags set
   if (config.use_active_prompt_release) {

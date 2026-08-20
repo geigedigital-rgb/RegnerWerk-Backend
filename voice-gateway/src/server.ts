@@ -10,7 +10,7 @@ import {
   RealtimeSession,
   type RealtimeSessionOptions,
 } from "@openai/agents/realtime";
-import { getStartingAgent, resolveWelcomeMessage } from "./agents/reception.js";
+import { getCallRuntime } from "./agents/reception.js";
 import { createCallRecord, updateCallLifecycle } from "./modules/supabase.js";
 import { lookupByPhone } from "./modules/crm-lookup.js";
 import { evaluateStopRules, preloadStopRules } from "./modules/stop-rules.js";
@@ -26,11 +26,12 @@ import {
   telnyxConfigured,
   transferToSip,
 } from "./modules/telnyx.js";
+import { loadPublishedAssistant } from "./modules/assistant.js";
 
 dotenv.config();
 
 const PORT = Number(process.env.PORT ?? 8000);
-const VERSION = "0.2.0-telnyx";
+const VERSION = "0.3.0-wired";
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY?.trim();
 const OPENAI_WEBHOOK_SECRET = process.env.OPENAI_WEBHOOK_SECRET?.trim();
@@ -56,19 +57,11 @@ async function main() {
 
   const activeCallTasks = new Map<string, Promise<void>>();
 
-  const sessionOptions: Partial<RealtimeSessionOptions> = {
-    model: "gpt-realtime",
-    config: {
-      audio: {
-        input: {
-          turnDetection: { type: "semantic_vad", interruptResponse: true },
-        },
-      },
-    },
-  };
-
   fastify.get("/health", async () => {
-    const runtime = await loadTelephonyRuntime().catch(() => null);
+    const [runtime, assistant] = await Promise.all([
+      loadTelephonyRuntime().catch(() => null),
+      loadPublishedAssistant("empfang").catch(() => null),
+    ]);
     return {
       status: "ok",
       activeCalls: activeCallTasks.size,
@@ -82,6 +75,16 @@ async function main() {
       webhookOpenAI: "/openai/webhook",
       pilotMode: runtime?.pilotMode ?? "unknown",
       recordingEnabled: runtime?.recordingEnabled ?? false,
+      assistant: assistant
+        ? {
+            source: assistant.source,
+            name: assistant.name,
+            model: assistant.model,
+            voice: assistant.voice,
+            vad: assistant.conversation.vadType,
+            interrupt: assistant.conversation.interruptResponse,
+          }
+        : null,
     };
   });
 
@@ -104,7 +107,11 @@ async function main() {
       })
     : null;
 
-  async function acceptCall(callId: string, startingAgent: Awaited<ReturnType<typeof getStartingAgent>>) {
+  async function acceptCall(
+    callId: string,
+    startingAgent: Awaited<ReturnType<typeof getCallRuntime>>["agent"],
+    sessionOptions: Partial<RealtimeSessionOptions>,
+  ) {
     if (!openai) return;
     try {
       const initialConfig = await OpenAIRealtimeSIP.buildInitialConfig(
@@ -154,16 +161,16 @@ async function main() {
   async function observeCall(callId: string): Promise<void> {
     if (!openai || !OPENAI_API_KEY) return;
 
-    const startingAgent = await getStartingAgent();
-    const welcome = await resolveWelcomeMessage();
-    const session = new RealtimeSession(startingAgent, {
+    const call = await getCallRuntime();
+    const session = new RealtimeSession(call.agent, {
       transport: new OpenAIRealtimeSIP(),
-      ...sessionOptions,
+      ...call.sessionOptions,
     });
 
     await updateCallLifecycle({
       openaiCallId: callId,
       event: "in_progress",
+      summary: `voice=${call.assistant.voice} model=${call.assistant.model} src=${call.assistant.source}`,
     });
 
     session.on("history_added", (item: RealtimeItem) => logHistoryItem(item));
@@ -176,12 +183,20 @@ async function main() {
 
     try {
       await session.connect({ apiKey: OPENAI_API_KEY, callId });
-      fastify.log.info(`Attached to realtime call ${callId}`);
+      fastify.log.info(
+        {
+          callId,
+          voice: call.assistant.voice,
+          model: call.assistant.model,
+          source: call.assistant.source,
+        },
+        `Attached to realtime call ${callId}`,
+      );
 
       session.transport.sendEvent({
         type: "response.create",
         response: {
-          instructions: `Say exactly '${welcome}' now before continuing the conversation.`,
+          instructions: `Say exactly '${call.welcome}' now before continuing the conversation.`,
         },
       });
 
@@ -278,9 +293,9 @@ async function main() {
               : "CRM unknown caller",
       });
 
-      const startingAgent = await getStartingAgent();
+      const call = await getCallRuntime();
       try {
-        await acceptCall(callId, startingAgent);
+        await acceptCall(callId, call.agent, call.sessionOptions);
       } catch (error) {
         fastify.log.error({ err: error }, `Failed to accept call ${callId}`);
         await updateCallLifecycle({

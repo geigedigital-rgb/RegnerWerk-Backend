@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { Loader2, Rocket, Save, Shield } from "lucide-react";
 import { cn } from "@/lib/cn";
 
@@ -39,6 +40,21 @@ type ToolPolicy = {
   published: { tools: ToolEntry[]; version: number } | null;
 };
 
+const VOICES = [
+  "alloy",
+  "ash",
+  "ballad",
+  "coral",
+  "echo",
+  "sage",
+  "shimmer",
+  "verse",
+  "marin",
+  "cedar",
+] as const;
+
+const MODELS = ["gpt-realtime", "gpt-realtime-mini"] as const;
+
 export function AssistantsStudio() {
   const [assistants, setAssistants] = useState<Assistant[]>([]);
   const [policies, setPolicies] = useState<ToolPolicy[]>([]);
@@ -47,6 +63,12 @@ export function AssistantsStudio() {
   const [voice, setVoice] = useState("alloy");
   const [welcome, setWelcome] = useState("");
   const [policyCode, setPolicyCode] = useState("empfang_default");
+  const [vadType, setVadType] = useState<"semantic_vad" | "server_vad">(
+    "semantic_vad",
+  );
+  const [vadEagerness, setVadEagerness] = useState("auto");
+  const [interruptResponse, setInterruptResponse] = useState(true);
+  const [silenceMs, setSilenceMs] = useState(500);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -84,7 +106,35 @@ export function AssistantsStudio() {
     setVoice(String(cfg.voice ?? "alloy"));
     setWelcome(String(cfg.welcome_message ?? ""));
     setPolicyCode(String(cfg.tool_policy_code ?? "empfang_default"));
+    setVadType(cfg.vad_type === "server_vad" ? "server_vad" : "semantic_vad");
+    setVadEagerness(String(cfg.vad_eagerness ?? "auto"));
+    setInterruptResponse(
+      cfg.interrupt_response === undefined
+        ? true
+        : Boolean(cfg.interrupt_response),
+    );
+    setSilenceMs(Number(cfg.silence_duration_ms) || 500);
   }, [active?.id, active?.draft?.id]);
+
+  function configurationPayload() {
+    const base =
+      active?.draft?.configuration ?? active?.published?.configuration ?? {};
+    return {
+      ...base,
+      model,
+      voice,
+      welcome_message: welcome,
+      tool_policy_code: policyCode,
+      vad_type: vadType,
+      vad_eagerness: vadEagerness,
+      interrupt_response: interruptResponse,
+      silence_duration_ms: silenceMs,
+      prefix_padding_ms: 300,
+      use_active_prompt_release: true,
+      use_active_rule_release: true,
+      use_active_scenario_release: true,
+    };
+  }
 
   async function save() {
     if (!active) return;
@@ -92,28 +142,17 @@ export function AssistantsStudio() {
     setError(null);
     setOk(null);
     try {
-      const base =
-        active.draft?.configuration ?? active.published?.configuration ?? {};
       const res = await fetch("/api/ai/assistants", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           assistantId: active.id,
-          configuration: {
-            ...base,
-            model,
-            voice,
-            welcome_message: welcome,
-            tool_policy_code: policyCode,
-            use_active_prompt_release: true,
-            use_active_rule_release: true,
-            use_active_scenario_release: true,
-          },
+          configuration: configurationPayload(),
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Speichern fehlgeschlagen");
-      setOk("Draft gespeichert");
+      setOk("Draft gespeichert — Publish, damit der Anruf es hört");
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Fehler");
@@ -128,23 +167,12 @@ export function AssistantsStudio() {
     setError(null);
     setOk(null);
     try {
-      const base =
-        active.draft?.configuration ?? active.published?.configuration ?? {};
       const saveRes = await fetch("/api/ai/assistants", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           assistantId: active.id,
-          configuration: {
-            ...base,
-            model,
-            voice,
-            welcome_message: welcome,
-            tool_policy_code: policyCode,
-            use_active_prompt_release: true,
-            use_active_rule_release: true,
-            use_active_scenario_release: true,
-          },
+          configuration: configurationPayload(),
         }),
       });
       const saveData = await saveRes.json();
@@ -155,7 +183,9 @@ export function AssistantsStudio() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Publish fehlgeschlagen");
-      setOk(`Published v${data.version?.version}`);
+      setOk(
+        `Published v${data.version?.version} — Voice Gateway lädt das beim nächsten Anruf`,
+      );
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Fehler");
@@ -177,13 +207,13 @@ export function AssistantsStudio() {
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-wider text-aqua-deep">
-            KI-Assistent · §8.2
+            Gespräch
           </p>
           <h1 className="mt-1 text-2xl font-bold tracking-tight text-forest">
             Assistenten
           </h1>
           <p className="mt-1 max-w-xl text-sm text-gray-600">
-            Verhaltensbundle: Prompt-/Rule-/Scenario-Releases + Tool Policy.
+            Begrüßung, Stimme, Tempo und Tools — nach Publish hörbar im Anruf.
           </p>
         </div>
         <div className="flex gap-2">
@@ -217,7 +247,7 @@ export function AssistantsStudio() {
         </p>
       ) : null}
 
-      <div className="mt-6 grid gap-4 lg:grid-cols-[240px_minmax(0,1fr)_280px]">
+      <div className="mt-6 grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)_260px]">
         <aside className="rounded-3xl border border-gray-100 bg-white p-3">
           <ul className="space-y-0.5">
             {assistants.map((a) => (
@@ -234,42 +264,152 @@ export function AssistantsStudio() {
                   <p className="text-[11px] text-gray-400">
                     {a.code}
                     {a.is_default ? " · default" : ""}
-                    {a.published ? ` · pub v${a.published.version}` : " · draft"}
+                    {a.published ? ` · live v${a.published.version}` : " · nur draft"}
                   </p>
                 </button>
               </li>
             ))}
           </ul>
+          <p className="mt-3 px-2 text-[11px] text-gray-400">
+            Prompt-Text:{" "}
+            <Link href="/ai/prompts" className="text-aqua-deep hover:underline">
+              Prompts
+            </Link>
+          </p>
         </aside>
 
-        <section className="rounded-3xl border border-gray-100 bg-white p-5">
+        <section className="space-y-4">
           {active ? (
             <>
-              <p className="text-xs text-gray-400">
-                {active.role} · {active.description}
-              </p>
-              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <div className="rounded-3xl border border-gray-100 bg-white p-5">
+                <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">
+                  Begrüßung
+                </p>
+                <textarea
+                  value={welcome}
+                  onChange={(e) => setWelcome(e.target.value)}
+                  rows={4}
+                  className="mt-2 w-full rounded-2xl border border-gray-100 bg-ice px-4 py-3 text-sm"
+                  placeholder="Was der Anrufer zuerst hört…"
+                />
+              </div>
+
+              <div className="rounded-3xl border border-gray-100 bg-white p-5">
+                <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">
+                  Stimme & Modell
+                </p>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <label className="block">
+                    <span className="mb-1 block text-sm font-medium text-forest">
+                      Stimme
+                    </span>
+                    <select
+                      value={voice}
+                      onChange={(e) => setVoice(e.target.value)}
+                      className="w-full rounded-2xl border border-gray-100 bg-ice px-4 py-3 text-sm"
+                    >
+                      {VOICES.map((v) => (
+                        <option key={v} value={v}>
+                          {v}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="block">
+                    <span className="mb-1 block text-sm font-medium text-forest">
+                      Modell
+                    </span>
+                    <select
+                      value={model}
+                      onChange={(e) => setModel(e.target.value)}
+                      className="w-full rounded-2xl border border-gray-100 bg-ice px-4 py-3 text-sm"
+                    >
+                      {MODELS.map((m) => (
+                        <option key={m} value={m}>
+                          {m}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              </div>
+
+              <div className="rounded-3xl border border-gray-100 bg-white p-5">
+                <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">
+                  Lebendigkeit (Pausen / Unterbrechen)
+                </p>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <label className="block">
+                    <span className="mb-1 block text-sm font-medium text-forest">
+                      Turn-Detection
+                    </span>
+                    <select
+                      value={vadType}
+                      onChange={(e) =>
+                        setVadType(
+                          e.target.value === "server_vad"
+                            ? "server_vad"
+                            : "semantic_vad",
+                        )
+                      }
+                      className="w-full rounded-2xl border border-gray-100 bg-ice px-4 py-3 text-sm"
+                    >
+                      <option value="semantic_vad">
+                        Semantisch (natürlicher Dialog)
+                      </option>
+                      <option value="server_vad">
+                        Stille-basiert (feste Pause)
+                      </option>
+                    </select>
+                  </label>
+                  {vadType === "semantic_vad" ? (
+                    <label className="block">
+                      <span className="mb-1 block text-sm font-medium text-forest">
+                        Eagerness
+                      </span>
+                      <select
+                        value={vadEagerness}
+                        onChange={(e) => setVadEagerness(e.target.value)}
+                        className="w-full rounded-2xl border border-gray-100 bg-ice px-4 py-3 text-sm"
+                      >
+                        <option value="auto">auto</option>
+                        <option value="low">low (geduldiger)</option>
+                        <option value="medium">medium</option>
+                        <option value="high">high (schneller)</option>
+                      </select>
+                    </label>
+                  ) : (
+                    <label className="block">
+                      <span className="mb-1 block text-sm font-medium text-forest">
+                        Stille bis Antwort (ms)
+                      </span>
+                      <input
+                        type="number"
+                        min={200}
+                        max={2000}
+                        step={50}
+                        value={silenceMs}
+                        onChange={(e) => setSilenceMs(Number(e.target.value))}
+                        className="w-full rounded-2xl border border-gray-100 bg-ice px-4 py-3 text-sm"
+                      />
+                    </label>
+                  )}
+                  <label className="flex items-center gap-3 sm:col-span-2">
+                    <input
+                      type="checkbox"
+                      checked={interruptResponse}
+                      onChange={(e) => setInterruptResponse(e.target.checked)}
+                      className="h-4 w-4 rounded border-gray-300"
+                    />
+                    <span className="text-sm text-forest">
+                      Anrufer darf die KI unterbrechen
+                    </span>
+                  </label>
+                </div>
+              </div>
+
+              <div className="rounded-3xl border border-gray-100 bg-white p-5">
                 <label className="block">
-                  <span className="mb-1 block text-sm font-medium text-forest">
-                    Modell
-                  </span>
-                  <input
-                    value={model}
-                    onChange={(e) => setModel(e.target.value)}
-                    className="w-full rounded-2xl border border-gray-100 bg-ice px-4 py-3 text-sm"
-                  />
-                </label>
-                <label className="block">
-                  <span className="mb-1 block text-sm font-medium text-forest">
-                    Voice
-                  </span>
-                  <input
-                    value={voice}
-                    onChange={(e) => setVoice(e.target.value)}
-                    className="w-full rounded-2xl border border-gray-100 bg-ice px-4 py-3 text-sm"
-                  />
-                </label>
-                <label className="block sm:col-span-2">
                   <span className="mb-1 block text-sm font-medium text-forest">
                     Tool Policy
                   </span>
@@ -285,22 +425,11 @@ export function AssistantsStudio() {
                     ))}
                   </select>
                 </label>
+                <p className="mt-3 text-xs text-gray-500">
+                  Draft speichern → Publish. Der Voice Gateway liest die
+                  published Version beim nächsten Anruf (Supabase / Admin API).
+                </p>
               </div>
-              <label className="mt-3 block">
-                <span className="mb-1 block text-sm font-medium text-forest">
-                  Welcome Message
-                </span>
-                <textarea
-                  value={welcome}
-                  onChange={(e) => setWelcome(e.target.value)}
-                  rows={4}
-                  className="w-full rounded-2xl border border-gray-100 bg-ice px-4 py-3 text-sm"
-                />
-              </label>
-              <p className="mt-3 text-xs text-gray-500">
-                Bindet automatisch aktive Prompt-, Rule- und Scenario-Releases beim
-                Publish (nach Critical Test Lab).
-              </p>
             </>
           ) : null}
         </section>

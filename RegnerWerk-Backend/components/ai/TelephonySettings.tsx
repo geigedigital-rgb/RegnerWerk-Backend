@@ -241,6 +241,21 @@ export function TelephonySettings() {
             hint="Health auf Railway / localhost:8000"
           />
         </div>
+        {gateway.assistant && typeof gateway.assistant === "object" ? (
+          <div className="mt-3 rounded-2xl border border-gray-100 bg-white px-3 py-3 text-xs text-gray-600">
+            <p className="font-medium text-forest">Live Assistent</p>
+            <p className="mt-1 font-mono text-[11px]">
+              {JSON.stringify(gateway.assistant)}
+            </p>
+            <p className="mt-2 text-[11px] text-gray-400">
+              Ändern unter{" "}
+              <Link href="/ai/assistenten" className="text-aqua-deep hover:underline">
+                KI → Assistenten
+              </Link>{" "}
+              (Publish).
+            </p>
+          </div>
+        ) : null}
         <div className="mt-3 grid gap-2">
           <CopyRow
             label="Telnyx Webhook (Mission Control)"
