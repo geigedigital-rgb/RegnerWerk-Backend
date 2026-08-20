@@ -18,6 +18,7 @@ export type PhoneCall = {
   status: string;
   outcome: string | null;
   urgency: string;
+  review_status: string;
   ai_mode: string;
   assistant_code: string | null;
   summary: string | null;
@@ -266,7 +267,7 @@ export async function updatePhoneCall(
       | "urgency"
       | "status"
     >
-  > & { review_status?: string },
+  >,
 ): Promise<PhoneCall> {
   const sb = getSupabaseAdmin();
   const { data, error } = await sb
