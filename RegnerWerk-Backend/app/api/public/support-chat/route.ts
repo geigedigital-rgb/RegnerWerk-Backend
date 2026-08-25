@@ -55,6 +55,8 @@ export async function POST(req: NextRequest) {
         {
           reply: result.reply,
           need_contact: result.need_contact,
+          handoff_reason: result.handoff_reason,
+          show_configurator: result.show_configurator,
           model: result.model,
           request_id: requestId,
           session_id: parsed.data.session_id ?? randomUUID(),

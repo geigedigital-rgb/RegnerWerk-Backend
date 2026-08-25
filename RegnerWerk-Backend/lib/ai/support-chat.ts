@@ -23,6 +23,9 @@ export type HandoffReason = "price" | "uncertain" | "request";
 
 const HANDOFF_RE =
   /\[\[HANDOFF(?::(price|uncertain|request))?\]\]/gi;
+const CONFIGURATOR_RE = /\[\[CONFIGURATOR\]\]/gi;
+const URL_RE =
+  /https?:\/\/\S+|www\.\S+|konfigurator\.regnerwerk\.de\S*/gi;
 
 function buildKnowledgeBlock(
   articles: Array<{
@@ -50,24 +53,37 @@ function buildSystemPrompt(knowledge: string): string {
 
 Gesprächsstil:
 - Zuerst zuhören und nachfragen. Nicht verkaufen, nicht drängen.
-- Kurze Antworten: 2–4 Sätze, max. ~60 Wörter. Eine klare nächste Frage.
+- Kurze Antworten: 2–4 Sätze, max. ~55 Wörter. Höchstens EINE nächste Frage.
 - Deutsch, ruhig, konkret.
 
-Was du NICHT darfst, solange du den Bedarf nicht kennst:
-- Keine Produkt-/Paket-Empfehlung, keinen Konfigurator, keinen Rückruf, kein Angebot vorschlagen.
-- Keine URLs/Links (auch nicht konfigurator.regnerwerk.de), außer der Besucher fragt ausdrücklich danach oder hat schon klar gesagt, dass er selbst planen/bestellen will.
-- Keine Festpreise, Termine, Garantien, Einzugsgebiete erfinden.
+Fragen im Chat — erlaubt:
+- Was der Besucher will (Neuanlage, Reparatur, Info…)
+- Gartenbild: Rasen, Beete, gemischt
+- grobe Fläche in m²
+- neu oder bestehende Anlage
+
+Fragen im Chat — VERBOTEN (nur später im Kontaktformular):
+- PLZ, Ort, Adresse, Region, Einzugsgebiet
+- Wasserquelle, Brunnen, Außenwasserhahn, Leitungsdruck
+- Telefon, E-Mail, Name (außer er fragt selbst nach Rückruf)
+
+Was du NICHT darfst, solange der Bedarf unklar ist:
+- Keinen Konfigurator, keinen Rückruf, kein Angebot vorschlagen.
+- Niemals URLs oder Domain-Namen schreiben (auch nicht konfigurator.regnerwerk.de).
 
 Gesprächsablauf:
-1. Beantworte die gestellte Frage knapp aus der Wissensbasis.
-2. Wenn Garten, Ziel oder Ausgangslage unklar sind: stelle EINE Frage (z. B. Rasen/Beete, Neubau oder bestehende Anlage, grobe Fläche, Wasserquelle, PLZ, was er wissen möchte).
-3. Erst wenn genug Kontext da ist UND der Besucher selbst plant/bestellen/konfigurieren will: dann darfst du den Sofort-Konfigurator nennen (https://konfigurator.regnerwerk.de) — mit einem Satz warum er passt.
-4. Preise: erkläre kurz, WARUM im Chat kein Festpreis geht (Fläche, Wasser, Aufwand). Dann eine Verständnisfrage, kein Formular.
-5. Handoff-Markierung nur in diesen Fällen:
-   - [[HANDOFF:price]] wenn der Besucher trotz Erklärung weiter einen konkreten Preis/Angebot will.
-   - [[HANDOFF:uncertain]] wenn nach 1–2 Rückfragen die Wissensbasis wirklich nicht reicht.
-   - [[HANDOFF:request]] wenn er EXPLIZIT Rückruf/Mensch/Kontakt will.
-6. Normale Info-Fragen: keine Markierung, keine Links, keine Angebote.
+1. Frage knapp beantworten.
+2. Bei unklarem Bedarf: EINE erlaubte Frage (Ziel / Rasen-Beete / Fläche / neu vs. bestehend).
+3. Konfigurator erst, wenn der Besucher klar planen, bestellen oder selbst konfigurieren will UND du grob weißt, worum es geht (z. B. Neuanlage + Rasen/Fläche). Dann:
+   - kurzer Satz ohne Link
+   - in einer eigenen Zeile genau: [[CONFIGURATOR]]
+   - Die Website zeigt dann eine Schaltfläche — du schreibst keine Links.
+4. Preise: kurz erklären, dass Festpreise erst nach Prüfung gehen (Fläche/Aufwand). Keine PLZ/Wasser-Fragen. Dann Verständnisfrage zum Garten.
+5. Handoff-Markierung nur:
+   - [[HANDOFF:price]] wenn er trotz Erklärung einen konkreten Preis/Angebot will
+   - [[HANDOFF:uncertain]] nach 1–2 erlaubten Rückfragen, wenn die Wissensbasis nicht reicht
+   - [[HANDOFF:request]] bei explizitem Rückruf/Mensch/Kontakt
+6. Normale Info: keine Markierung, kein Konfigurator.
 
 ## Wissensbasis
 ${knowledge}`;
@@ -93,10 +109,11 @@ function inferReasonFromUser(
   return null;
 }
 
-function stripHandoff(text: string): {
+function parseAssistantText(text: string): {
   reply: string;
   needContact: boolean;
   reason: HandoffReason | null;
+  showConfigurator: boolean;
 } {
   let reason: HandoffReason | null = null;
   const matches = [...text.matchAll(HANDOFF_RE)];
@@ -108,12 +125,24 @@ function stripHandoff(text: string): {
       reason = reason ?? "uncertain";
     }
   }
-  const needContact = matches.length > 0;
+  const showConfigurator =
+    /\[\[CONFIGURATOR\]\]/i.test(text) ||
+    /konfigurator\.regnerwerk\.de|\/konfigurator/i.test(text);
+
   const reply = text
     .replace(HANDOFF_RE, "")
+    .replace(CONFIGURATOR_RE, "")
+    .replace(URL_RE, "")
     .replace(/\n{3,}/g, "\n\n")
+    .replace(/[ \t]+\n/g, "\n")
     .trim();
-  return { reply, needContact, reason };
+
+  return {
+    reply,
+    needContact: matches.length > 0,
+    reason,
+    showConfigurator,
+  };
 }
 
 export async function runSupportChat(
@@ -122,6 +151,7 @@ export async function runSupportChat(
   reply: string;
   need_contact: boolean;
   handoff_reason: HandoffReason | null;
+  show_configurator: boolean;
   model: string;
 }> {
   const articles = await listPublishedKnowledgeForGateway();
@@ -142,7 +172,7 @@ export async function runSupportChat(
     maxOutputTokens: 280,
   });
 
-  const parsed = stripHandoff(raw);
+  const parsed = parseAssistantText(raw);
   const reason =
     parsed.reason ??
     (parsed.needContact ? inferReasonFromUser(lastUser) ?? "uncertain" : null);
@@ -153,6 +183,7 @@ export async function runSupportChat(
       "Dazu brauche ich kurz das Fachteam — ich erkläre gerne den nächsten Schritt.",
     need_contact: parsed.needContact,
     handoff_reason: reason,
+    show_configurator: parsed.showConfigurator,
     model: getGeminiModel(),
   };
 }
