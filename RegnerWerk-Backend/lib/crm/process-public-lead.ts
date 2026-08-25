@@ -7,6 +7,7 @@ import {
   nextReferenceCode,
   type PublicLeadInput,
 } from "@/lib/crm/public-leads";
+import { sendTelegramLead } from "@/lib/telegram";
 
 function ipHash(ip: string): string {
   return createHash("sha256").update(`rw-lead:${ip}`).digest("hex").slice(0, 32);
@@ -19,6 +20,16 @@ function uaClass(ua: string | null): string {
   return "desktop";
 }
 
+const FORM_LABEL: Record<PublicLeadInput["form_type"], string> = {
+  contact: "Kontakt",
+  calculator: "Rechner",
+  repair: "Reparatur",
+  service: "Service",
+  projekt_anfrage: "Projekt-Anfrage",
+  support_chat: "Support-Chat",
+  other: "Sonstige",
+};
+
 export type ProcessPublicLeadResult = {
   accepted: true;
   reference: string;
@@ -29,6 +40,7 @@ export type ProcessPublicLeadResult = {
 /**
  * Idempotent website → Inbox intake (TZ §10.1 / §30.2).
  * Does not reveal whether a customer already exists.
+ * Every new CRM lead also notifies Telegram (if configured).
  */
 export async function processPublicLead(opts: {
   input: PublicLeadInput;
@@ -168,6 +180,27 @@ export async function processPublicLead(opts: {
       form_type: input.form_type,
       submission_id: input.submission_id,
     },
+  });
+
+  // Fire-and-forget — CRM intake must not fail if Telegram is down
+  void sendTelegramLead({
+    source: FORM_LABEL[input.form_type] ?? input.form_type,
+    name: input.name,
+    email: input.email || null,
+    phone: input.phone || null,
+    message: input.message || summary,
+    extra: {
+      Referenz: reference,
+      Formular: input.form_type,
+      PLZ: postal,
+      Adresse: input.address || null,
+      Garten: input.garden_type || null,
+      Fläche_m2: input.area_m2 ?? null,
+      Seite: input.landing_page || null,
+      Lead: leadId || null,
+    },
+  }).catch((err) => {
+    console.error("[public-leads] telegram failed", err);
   });
 
   return {
