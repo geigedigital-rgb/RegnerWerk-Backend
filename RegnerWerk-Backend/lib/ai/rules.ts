@@ -198,11 +198,13 @@ export function evaluateRulesAgainstText(
       if (rule.match_type === "exact") {
         hit = text.trim().toLowerCase() === rule.pattern.trim().toLowerCase();
       } else if (rule.match_type === "regex" || rule.match_type === "keyword") {
-        const re = new RegExp(rule.pattern, "i");
+        // Strip inline flags like (?i) — JS RegExp takes flags as 2nd arg only
+        const pattern = rule.pattern.replace(/^\(\?[imsux]+\)/, "");
+        const re = new RegExp(pattern, "i");
         hit = re.test(text);
       } else {
-        // semantic deferred — keyword fallback
-        const re = new RegExp(rule.pattern, "i");
+        const pattern = rule.pattern.replace(/^\(\?[imsux]+\)/, "");
+        const re = new RegExp(pattern, "i");
         hit = re.test(text);
       }
     } catch {

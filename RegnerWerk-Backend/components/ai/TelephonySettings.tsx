@@ -26,6 +26,8 @@ type Connections = {
   telnyxConnectionId?: string | null;
   webhookTelnyx?: string;
   webhookOpenAI?: string;
+  texmlInbound?: string;
+  routing?: string;
   secretsNote?: string;
 };
 
@@ -258,27 +260,31 @@ export function TelephonySettings() {
         ) : null}
         <div className="mt-3 grid gap-2">
           <CopyRow
-            label="Telnyx Webhook (Mission Control)"
-            value={connections.webhookTelnyx || ""}
+            label="TeXML Voice URL (Telnyx Application)"
+            value={connections.texmlInbound || ""}
           />
           <CopyRow
             label="OpenAI Webhook (Dashboard)"
             value={connections.webhookOpenAI || ""}
           />
           <CopyRow
+            label="Routing"
+            value={connections.routing || "texml_dial_openai_sip"}
+          />
+          <CopyRow
             label="Telnyx Nummer"
             value={connections.telnyxPhone || testNumber || ""}
           />
           <CopyRow
-            label="Telnyx App / Connection ID"
+            label="TeXML Application ID"
             value={connections.telnyxConnectionId || ""}
           />
         </div>
         {!connections.openaiSip ? (
           <p className="mt-3 rounded-2xl bg-amber-50 px-3 py-2 text-xs text-amber-900">
             Fehlt noch: <strong>OPENAI_SIP_URI</strong> aus dem OpenAI Dashboard
-            (Realtime SIP). Ohne sie kann Telnyx den Anruf nicht zur KI
-            verbinden. Danach Key in Railway setzen und Gateway neu starten.
+            (Realtime SIP). Ohne sie kann TeXML den Anruf nicht zur KI dialen.
+            Danach Key in Railway setzen und Gateway neu starten.
           </p>
         ) : null}
       </Panel>

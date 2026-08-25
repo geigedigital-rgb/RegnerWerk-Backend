@@ -13,7 +13,7 @@ export async function GET() {
   try {
     const [studio, releases] = await Promise.all([
       listPromptStudio(),
-      listPromptReleases(10),
+      listPromptReleases(30),
     ]);
     return NextResponse.json({ ...studio, releases });
   } catch (e) {

@@ -8,6 +8,7 @@ export const publicLeadSchema = z.object({
     "repair",
     "service",
     "projekt_anfrage",
+    "support_chat",
     "other",
   ]),
   request_type: z
@@ -60,6 +61,14 @@ export function inferRequestType(input: {
   const m = (input.message || "").toLowerCase();
   if (input.form_type === "repair" || /reparatur|rohrbruch|undicht/.test(m)) {
     return "repair";
+  }
+  if (input.form_type === "support_chat") {
+    if (/reparatur|störung|undicht/.test(m)) return "repair";
+    if (/wartung|einwinter/.test(m)) {
+      return /einwinter/.test(m) ? "winterization" : "maintenance";
+    }
+    if (/erweiterung|nachrüstung/.test(m)) return "extension";
+    return "other";
   }
   if (input.form_type === "service" || /wartung|service|einwinter/.test(g + m)) {
     return /einwinter/.test(g + m) ? "winterization" : "maintenance";

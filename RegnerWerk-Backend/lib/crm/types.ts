@@ -12,6 +12,7 @@ export type InboxSourceType =
   | "missed_call"
   | "manual"
   | "import"
+  | "configurator"
   | "other";
 
 export type InboxStatus =

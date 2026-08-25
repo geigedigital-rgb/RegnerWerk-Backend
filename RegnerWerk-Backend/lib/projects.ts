@@ -5,6 +5,7 @@ import {
   type ProjectPayload,
 } from "@/lib/project-schema";
 import { buildProjectPdf } from "@/lib/pdf/project-pdf";
+import { linkSubmittedProjectToCrm } from "@/lib/crm/configurator-intake";
 
 export type ProjectStatus = "submitted" | "draft";
 
@@ -20,6 +21,8 @@ export type ProjectRow = {
   payload: ProjectPayload;
   pdf_path: string | null;
   parent_id: string | null;
+  contact_id: string | null;
+  lead_id: string | null;
 };
 
 export type ProjectListItem = Omit<ProjectRow, "payload"> & {
@@ -42,7 +45,7 @@ export async function listProjects(): Promise<ProjectListItem[]> {
   const { data, error } = await sb
     .from("projects")
     .select(
-      "id, created_at, updated_at, status, place_id, place_label, customer_email, customer_name, pdf_path, parent_id, payload",
+      "id, created_at, updated_at, status, place_id, place_label, customer_email, customer_name, pdf_path, parent_id, contact_id, lead_id, payload",
     )
     .order("created_at", { ascending: false })
     .limit(200);
@@ -157,6 +160,27 @@ export async function upsertProject(
     project = updated as ProjectRow;
   }
 
+  if (email && input.status === "submitted") {
+    try {
+      const linked = await linkSubmittedProjectToCrm(project);
+      if (linked) {
+        const { data: crmRow, error: crmErr } = await sb
+          .from("projects")
+          .update({
+            contact_id: linked.contactId,
+            lead_id: linked.leadId,
+          })
+          .eq("id", project.id)
+          .select("*")
+          .single();
+        if (crmErr) throw new Error(crmErr.message);
+        project = crmRow as ProjectRow;
+      }
+    } catch (err) {
+      console.error("[projects] CRM link failed", err);
+    }
+  }
+
   return project;
 }
 
@@ -212,10 +236,31 @@ export async function getPdfBytes(id: string): Promise<Uint8Array | null> {
   return new Uint8Array(await data.arrayBuffer());
 }
 
+export async function listProjectsForContact(
+  contactId: string,
+): Promise<ProjectListItem[]> {
+  const sb = getSupabaseAdmin();
+  const { data, error } = await sb
+    .from("projects")
+    .select(
+      "id, created_at, updated_at, status, place_id, place_label, customer_email, customer_name, pdf_path, parent_id, contact_id, lead_id, payload",
+    )
+    .eq("contact_id", contactId)
+    .order("created_at", { ascending: false })
+    .limit(50);
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((row) => {
+    const payload = row.payload as ProjectPayload;
+    const { payload: _p, ...rest } = row as ProjectRow;
+    return { ...rest, ...metaFromPayload(payload) };
+  });
+}
+
 export function frontendOpenUrl(projectId: string): string {
-  const base = (process.env.FRONTEND_URL ?? "http://localhost:3000").replace(
-    /\/$/,
-    "",
-  );
+  const base = (
+    process.env.FRONTEND_URL ||
+    process.env.NEXT_PUBLIC_FRONTEND_URL ||
+    "http://localhost:3002"
+  ).replace(/\/$/, "");
   return `${base}/konfigurator?projectId=${encodeURIComponent(projectId)}`;
 }

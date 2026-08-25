@@ -50,9 +50,13 @@ export async function GET() {
         null,
       webhookTelnyx: `${publicGateway}/api/webhooks/telnyx`,
       webhookOpenAI: `${publicGateway}/openai/webhook`,
+      texmlInbound: `${publicGateway}/texml/inbound`,
+      routing:
+        (typeof gateway.routing === "string" && gateway.routing) ||
+        "texml_dial_openai_sip",
       /** Secrets live in Railway / gateway env — never returned here. */
       secretsNote:
-        "API-Keys nur in Railway / voice-gateway .env — hier nur Status.",
+        "API-Keys nur in Railway / voice-gateway .env — hier nur Status. Routing: TeXML Dial → OpenAI SIP.",
     };
 
     return NextResponse.json({ settings, gateway, connections });

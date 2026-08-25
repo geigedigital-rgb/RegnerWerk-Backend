@@ -193,16 +193,16 @@ export async function getContactChannels(
   return (data ?? []) as ContactChannel[];
 }
 
-export async function findContactsByPhone(
-  phone: string,
+async function contactsByChannel(
+  type: "phone" | "email",
+  valueNormalized: string,
 ): Promise<Contact[]> {
-  const normalized = normalizePhone(phone);
-  if (!normalized) return [];
+  if (!valueNormalized) return [];
   const { data, error } = await sb()
     .from("contact_channels")
     .select("contact_id")
-    .eq("type", "phone")
-    .eq("value_normalized", normalized)
+    .eq("type", type)
+    .eq("value_normalized", valueNormalized)
     .limit(10);
   throwOnError(error);
   const ids = [...new Set((data ?? []).map((r) => r.contact_id as string))];
@@ -213,6 +213,106 @@ export async function findContactsByPhone(
     .in("id", ids);
   throwOnError(cErr);
   return (contacts ?? []) as Contact[];
+}
+
+export async function findContactsByPhone(
+  phone: string,
+): Promise<Contact[]> {
+  return contactsByChannel("phone", normalizePhone(phone));
+}
+
+export async function findContactsByEmail(
+  email: string,
+): Promise<Contact[]> {
+  return contactsByChannel("email", normalizeEmail(email));
+}
+
+function splitPersonName(name?: string | null): {
+  first_name?: string;
+  last_name?: string;
+} {
+  const parts = (name ?? "").trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return {};
+  return {
+    first_name: parts[0],
+    last_name: parts.length > 1 ? parts.slice(1).join(" ") : undefined,
+  };
+}
+
+async function addMissingChannels(
+  contactId: string,
+  input: { phone?: string; email?: string },
+): Promise<void> {
+  const existing = await getContactChannels(contactId);
+  const rows: Array<Record<string, unknown>> = [];
+  if (input.phone?.trim()) {
+    const normalized = normalizePhone(input.phone);
+    const has = existing.some(
+      (c) => c.type === "phone" && c.value_normalized === normalized,
+    );
+    if (!has && normalized) {
+      rows.push({
+        contact_id: contactId,
+        type: "phone",
+        value_raw: input.phone.trim(),
+        value_normalized: normalized,
+        is_primary: !existing.some((c) => c.type === "phone"),
+        label: "mobil",
+      });
+    }
+  }
+  if (input.email?.trim()) {
+    const normalized = normalizeEmail(input.email);
+    const has = existing.some(
+      (c) => c.type === "email" && c.value_normalized === normalized,
+    );
+    if (!has && normalized) {
+      rows.push({
+        contact_id: contactId,
+        type: "email",
+        value_raw: input.email.trim(),
+        value_normalized: normalized,
+        is_primary: !existing.some((c) => c.type === "email"),
+        label: "privat",
+      });
+    }
+  }
+  if (!rows.length) return;
+  const { error } = await sb().from("contact_channels").insert(rows);
+  throwOnError(error);
+}
+
+/** Match by email, then phone; otherwise create a person contact. */
+export async function findOrCreateContactFromIdentity(input: {
+  name?: string | null;
+  email?: string | null;
+  phone?: string | null;
+}): Promise<{ contact: Contact; created: boolean }> {
+  let matches: Contact[] = [];
+  if (input.email?.trim()) {
+    matches = await findContactsByEmail(input.email);
+  }
+  if (!matches.length && input.phone?.trim()) {
+    matches = await findContactsByPhone(input.phone);
+  }
+
+  if (matches.length) {
+    const contact = matches[0];
+    await addMissingChannels(contact.id, {
+      phone: input.phone ?? undefined,
+      email: input.email ?? undefined,
+    });
+    return { contact, created: false };
+  }
+
+  const names = splitPersonName(input.name);
+  const contact = await createContact({
+    first_name: names.first_name,
+    last_name: names.last_name,
+    phone: input.phone ?? undefined,
+    email: input.email ?? undefined,
+  });
+  return { contact, created: true };
 }
 
 export async function createContact(input: {
@@ -395,6 +495,16 @@ export async function createInboxItem(input: {
       matched_confidence = "medium";
     }
   }
+  if (!suggested_contact_id && input.contact_email?.trim()) {
+    const matches = await findContactsByEmail(input.contact_email);
+    if (matches.length === 1) {
+      suggested_contact_id = matches[0].id;
+      matched_confidence = "exact";
+    } else if (matches.length > 1) {
+      suggested_contact_id = matches[0].id;
+      matched_confidence = "medium";
+    }
+  }
 
   const { data, error } = await sb()
     .from("inbox_items")
@@ -476,7 +586,10 @@ export async function markInboxSpam(id: string): Promise<InboxItem> {
 /**
  * Accept inbox item as new lead (+ contact if needed). Vertical slice TZ §46.
  */
-export async function acceptInboxAsLead(id: string): Promise<{
+export async function acceptInboxAsLead(
+  id: string,
+  opts?: { actor?: TimelineEvent["actor_type"] },
+): Promise<{
   inbox: InboxItem;
   lead: Lead;
   contact: Contact;
@@ -490,16 +603,12 @@ export async function acceptInboxAsLead(id: string): Promise<{
     contact = await getContact(item.suggested_contact_id);
   }
   if (!contact) {
-    const nameParts = (item.contact_name ?? "").trim().split(/\s+/);
-    const first = nameParts[0] || undefined;
-    const last =
-      nameParts.length > 1 ? nameParts.slice(1).join(" ") : undefined;
-    contact = await createContact({
-      first_name: first,
-      last_name: last,
-      phone: item.contact_phone ?? undefined,
-      email: item.contact_email ?? undefined,
+    const found = await findOrCreateContactFromIdentity({
+      name: item.contact_name,
+      email: item.contact_email,
+      phone: item.contact_phone,
     });
+    contact = found.contact;
   }
 
   const { data: leadData, error: leadErr } = await sb()
@@ -539,7 +648,7 @@ export async function acceptInboxAsLead(id: string): Promise<{
     type: "lead_created",
     title: "Lead aus Inbox erstellt",
     summary: lead.summary_current ?? undefined,
-    actor_type: "employee",
+    actor_type: opts?.actor ?? "employee",
     source: item.source_type,
     contact_id: contact.id,
     lead_id: lead.id,
@@ -551,12 +660,17 @@ export async function acceptInboxAsLead(id: string): Promise<{
 
 // ─── Leads ──────────────────────────────────────────────────────────────────
 
-export async function listLeads(limit = 100): Promise<Lead[]> {
-  const { data, error } = await sb()
+export async function listLeads(
+  limit = 100,
+  opts?: { contactId?: string },
+): Promise<Lead[]> {
+  let q = sb()
     .from("leads")
     .select("*")
     .order("updated_at", { ascending: false })
     .limit(limit);
+  if (opts?.contactId) q = q.eq("contact_id", opts.contactId);
+  const { data, error } = await q;
   throwOnError(error);
   return (data ?? []) as Lead[];
 }

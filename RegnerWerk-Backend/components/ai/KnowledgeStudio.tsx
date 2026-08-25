@@ -160,7 +160,12 @@ export function KnowledgeStudio() {
             Wissensbasis
           </h1>
           <p className="mt-1 max-w-xl text-sm text-gray-600">
-            Genehmigte Artikel für Assistenten — nur published Inhalte gehen live.
+            Genehmigte Artikel für Telefon-Assistent und Website-Support-Chat — nur
+            published Inhalte gehen live. CRM-Anfragen:{" "}
+            <a href="/crm/chat" className="text-aqua-deep underline-offset-2 hover:underline">
+              CRM → Support-Chat
+            </a>
+            .
           </p>
         </div>
         <div className="flex flex-wrap gap-2">

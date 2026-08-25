@@ -75,6 +75,27 @@ const sofortPlan = z
   })
   .passthrough();
 
+const calcLogEntry = z
+  .object({
+    timestamp: z.string(),
+    algorithm: z.string(),
+    brand: z.string(),
+    lawnCount: z.number(),
+    totalAreaM2: z.number(),
+    headCount: z.number(),
+    zoneCount: z.number(),
+    zones: z.array(
+      z.object({
+        id: z.string(),
+        headCount: z.number(),
+        flowLpm: z.number(),
+        families: z.array(z.string()),
+      }),
+    ),
+    headsByFamily: z.record(z.string(), z.number()),
+  })
+  .passthrough();
+
 export const projectPayloadSchema = z.object({
   version: z.literal(1),
   updatedAt: z.string().optional(),
@@ -83,6 +104,7 @@ export const projectPayloadSchema = z.object({
   fixtures: z.array(plotFixture).max(50),
   sofortPlan: sofortPlan,
   plotStage: z.enum(["zones", "technik", "ergebnis"]).optional(),
+  calcHistory: z.array(calcLogEntry).max(100).optional(),
 });
 
 export const submitBodySchema = z.object({

@@ -1,8 +1,13 @@
 # RegnerWerk Voice Gateway
 
-Long-running Node service: **Telnyx Call Control** → **OpenAI Realtime SIP**.
+**Telnyx TeXML Dial → OpenAI Realtime SIP** (same pattern as Twilio Elastic SIP / OpenAI docs).
 
-Foundation: [openai-agents-js/examples/realtime-twilio-sip](https://github.com/openai/openai-agents-js/tree/main/examples/realtime-twilio-sip)
+## Call flow
+
+1. Caller dials Telnyx DID  
+2. Telnyx fetches `GET /texml/inbound` → `<Dial><Sip>OPENAI_SIP_URI</Sip></Dial>`  
+3. OpenAI fires `POST /openai/webhook` (`realtime.call.incoming`)  
+4. Gateway accepts (slim session) + WebSocket sideband (tools / welcome / CRM)
 
 ## Local
 
@@ -13,51 +18,30 @@ npm install
 npm run dev   # http://localhost:8000/health
 ```
 
-Without `OPENAI_API_KEY` / `OPENAI_WEBHOOK_SECRET`, `/health` still runs; OpenAI accept is disabled.
-Without `TELNYX_API_KEY` / `OPENAI_SIP_URI`, Telnyx can ACK webhooks but cannot bridge audio.
-
 ## Endpoints
 
 | Path | Role |
 |---|---|
-| `GET /health` | Status (openai / telnyx / SIP flags) |
-| `POST /api/webhooks/telnyx` | Telnyx Call Control → answer + transfer to SIP |
-| `POST /openai/webhook` | OpenAI `realtime.call.incoming` |
-| `POST /twilio/voice` | Legacy Twilio stub |
-| `POST /twilio/status` | Legacy Twilio status |
-| `GET /transfer/resolve` | Debug transfer target |
+| `GET /health` | Status |
+| `GET|POST /texml/inbound` | TeXML → Dial OpenAI SIP |
+| `POST /texml/status` | TeXML status callback |
+| `POST /openai/webhook` | Accept + observe Realtime call |
+| `POST /api/webhooks/telnyx` | Legacy Call Control ACK only |
 
-Admin (port 3001) must be up for: CRM lookup, telephony runtime, call ingest, prompts/rules.
+## Telnyx setup
 
-## Production wiring (Railway)
+1. TeXML Application voice URL → `https://<gateway>/texml/inbound`  
+2. Assign DID `connection_id` to that TeXML application  
+3. Outbound Voice Profile on the TeXML app (needed to Dial SIP)  
+4. OpenAI project webhook → `https://<gateway>/openai/webhook`
 
-1. Deploy this folder (**Root Directory:** `voice-gateway`)
-2. Set env in Railway (never commit `.env`):
+## Env (Railway)
 
 | Var | Required |
 |---|---|
 | `OPENAI_API_KEY` | yes |
 | `OPENAI_WEBHOOK_SECRET` | yes |
-| `OPENAI_SIP_URI` | yes (audio path) |
-| `TELNYX_API_KEY` | yes |
-| `TELNYX_CONNECTION_ID` | recommended |
+| `OPENAI_SIP_URI` | yes |
+| `TELNYX_TEXML_APPLICATION_ID` | recommended |
 | `TELNYX_PHONE_NUMBER` | recommended |
-| `ADMIN_API_URL` | when Admin is live |
-
-3. **Telnyx** Mission Control → Voice API Application webhook:
-
-```text
-https://<railway-public-domain>/api/webhooks/telnyx
-```
-
-4. **OpenAI** Dashboard → Webhooks → URL:
-
-```text
-https://<railway-public-domain>/openai/webhook
-```
-
-   Event: `realtime.call.incoming` → signing secret → `OPENAI_WEBHOOK_SECRET`
-
-5. Status in Admin: **KI → Telefonie**
-
-See `RegnerWerk-Backend/docs/adr/013-telephony-runtime.md`.
+| `ADMIN_API_URL` / Supabase | for CRM + published assistant |

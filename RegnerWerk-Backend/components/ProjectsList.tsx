@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import {
   Copy,
   ExternalLink,
@@ -23,6 +24,7 @@ type ProjectListItem = {
   customer_name: string | null;
   pdf_path: string | null;
   parent_id: string | null;
+  contact_id: string | null;
   head_count: number | null;
   lawn_area_m2: number | null;
   total_eur: number | null;
@@ -51,9 +53,7 @@ export function ProjectsList() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const frontendUrl =
     process.env.NEXT_PUBLIC_FRONTEND_URL ||
-    (typeof window !== "undefined"
-      ? ""
-      : "http://localhost:3000");
+    (typeof window !== "undefined" ? "" : "http://localhost:3002");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -77,7 +77,7 @@ export function ProjectsList() {
   function openUrl(id: string) {
     const base =
       (process.env.NEXT_PUBLIC_FRONTEND_URL || "").replace(/\/$/, "") ||
-      "http://localhost:3000";
+      "http://localhost:3002";
     return `${base}/konfigurator?projectId=${encodeURIComponent(id)}`;
   }
 
@@ -172,9 +172,12 @@ export function ProjectsList() {
               >
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <p className="truncate text-[15px] font-semibold text-forest">
+                    <Link
+                      href={`/projekte/${p.id}`}
+                      className="truncate text-[15px] font-semibold text-forest hover:text-aqua-deep hover:underline"
+                    >
                       {p.place_label || p.place_id || "Ohne Adresse"}
-                    </p>
+                    </Link>
                     <span
                       className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
                         p.status === "submitted"
@@ -194,7 +197,16 @@ export function ProjectsList() {
                     {p.customer_email ? (
                       <span className="inline-flex items-center gap-1">
                         <Mail size={11} />
-                        {p.customer_email}
+                        {p.contact_id ? (
+                          <Link
+                            href={`/crm/kunden/${p.contact_id}`}
+                            className="text-aqua-deep hover:underline"
+                          >
+                            {p.customer_email}
+                          </Link>
+                        ) : (
+                          p.customer_email
+                        )}
                       </span>
                     ) : null}
                     {p.head_count != null ? (

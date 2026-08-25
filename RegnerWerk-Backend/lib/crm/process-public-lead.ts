@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { getSupabaseAdmin } from "@/lib/supabase";
-import { createInboxItem, addTimelineEvent } from "@/lib/crm";
+import { createInboxItem, addTimelineEvent, acceptInboxAsLead } from "@/lib/crm";
 import {
   extractPostalCode,
   inferRequestType,
@@ -140,6 +140,20 @@ export async function processPublicLead(opts: {
     throw new Error(insErr.message);
   }
 
+  let leadId: string | undefined;
+  let contactId = inbox.suggested_contact_id;
+  try {
+    const accepted = await acceptInboxAsLead(inbox.id, { actor: "system" });
+    leadId = accepted.lead.id;
+    contactId = accepted.contact.id;
+    await sb
+      .from("web_form_submissions")
+      .update({ lead_id: accepted.lead.id })
+      .eq("submission_id", input.submission_id);
+  } catch (err) {
+    console.error("[public-leads] auto-accept failed", err);
+  }
+
   await addTimelineEvent({
     type: "website_submission_received",
     title: "Website-Anfrage eingegangen",
@@ -147,7 +161,8 @@ export async function processPublicLead(opts: {
     source: "website",
     actor_type: "customer",
     inbox_item_id: inbox.id,
-    contact_id: inbox.suggested_contact_id,
+    contact_id: contactId,
+    lead_id: leadId,
     payload: {
       reference,
       form_type: input.form_type,

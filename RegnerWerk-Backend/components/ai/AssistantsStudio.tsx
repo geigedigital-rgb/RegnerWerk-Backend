@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Loader2, Rocket, Save, Shield } from "lucide-react";
+import { Loader2, Rocket, Save, Shield, Volume2 } from "lucide-react";
 import { cn } from "@/lib/cn";
 
 type ToolEntry = {
@@ -71,8 +71,10 @@ export function AssistantsStudio() {
   const [silenceMs, setSilenceMs] = useState(500);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [previewing, setPreviewing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
+  const previewAudioRef = useRef<HTMLAudioElement | null>(null);
 
   const active = assistants.find((a) => a.id === activeId) ?? assistants[0] ?? null;
   const activePolicy = policies.find((p) => p.code === policyCode);
@@ -194,6 +196,55 @@ export function AssistantsStudio() {
     }
   }
 
+  async function previewVoice() {
+    setPreviewing(true);
+    setError(null);
+    try {
+      if (previewAudioRef.current) {
+        previewAudioRef.current.pause();
+        previewAudioRef.current.src = "";
+        previewAudioRef.current = null;
+      }
+      const res = await fetch(
+        `/api/ai/assistants/voice-preview?voice=${encodeURIComponent(voice)}`,
+        { cache: "no-store" },
+      );
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as {
+          error?: string;
+          detail?: string;
+        };
+        throw new Error(data.error || data.detail || "Preview fehlgeschlagen");
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      previewAudioRef.current = audio;
+      audio.onended = () => {
+        URL.revokeObjectURL(url);
+        setPreviewing(false);
+      };
+      audio.onerror = () => {
+        URL.revokeObjectURL(url);
+        setPreviewing(false);
+        setError("Audio konnte nicht abgespielt werden");
+      };
+      await audio.play();
+    } catch (e) {
+      setPreviewing(false);
+      setError(e instanceof Error ? e.message : "Preview fehlgeschlagen");
+    }
+  }
+
+  useEffect(() => {
+    return () => {
+      if (previewAudioRef.current) {
+        previewAudioRef.current.pause();
+        previewAudioRef.current = null;
+      }
+    };
+  }, []);
+
   if (loading) {
     return (
       <div className="flex items-center gap-2 px-4 py-12 text-sm text-gray-500">
@@ -299,22 +350,38 @@ export function AssistantsStudio() {
                   Stimme & Modell
                 </p>
                 <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                  <label className="block">
+                  <div>
                     <span className="mb-1 block text-sm font-medium text-forest">
                       Stimme
                     </span>
-                    <select
-                      value={voice}
-                      onChange={(e) => setVoice(e.target.value)}
-                      className="w-full rounded-2xl border border-gray-100 bg-ice px-4 py-3 text-sm"
-                    >
-                      {VOICES.map((v) => (
-                        <option key={v} value={v}>
-                          {v}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                    <div className="flex gap-2">
+                      <select
+                        value={voice}
+                        onChange={(e) => setVoice(e.target.value)}
+                        className="min-w-0 flex-1 rounded-2xl border border-gray-100 bg-ice px-4 py-3 text-sm"
+                      >
+                        {VOICES.map((v) => (
+                          <option key={v} value={v}>
+                            {v}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => void previewVoice()}
+                        disabled={previewing || busy}
+                        title="Kurze deutsche Probe abspielen"
+                        className="inline-flex shrink-0 items-center gap-1.5 rounded-2xl border border-gray-100 bg-white px-3 py-2 text-sm font-medium text-forest hover:bg-ice disabled:opacity-50"
+                      >
+                        {previewing ? (
+                          <Loader2 size={16} className="animate-spin" />
+                        ) : (
+                          <Volume2 size={16} />
+                        )}
+                        Anhören
+                      </button>
+                    </div>
+                  </div>
                   <label className="block">
                     <span className="mb-1 block text-sm font-medium text-forest">
                       Modell

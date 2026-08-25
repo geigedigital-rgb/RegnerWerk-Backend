@@ -233,8 +233,12 @@ export async function publishAssistant(opts: {
     });
     // Only block when critical scenarios exist and fail
     if (suite.criticalFailed > 0) {
+      const fails = suite.results
+        .filter((r) => !r.passed && r.critical)
+        .map((r) => r.code)
+        .join(", ");
       throw new Error(
-        `Publish blockiert: critical Test Lab fails (${suite.criticalFailed})`,
+        `Publish blockiert: critical Test Lab fails (${suite.criticalFailed}): ${fails}`,
       );
     }
   }

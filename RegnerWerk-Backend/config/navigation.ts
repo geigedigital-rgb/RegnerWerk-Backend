@@ -92,6 +92,12 @@ export const WORKSPACES: WorkspaceConfig[] = [
         items: [
           { href: "/crm", label: "Übersicht", icon: LayoutDashboard, tzRef: "§7.1" },
           { href: "/crm/inbox", label: "Inbox", icon: Inbox, tzRef: "§7.2" },
+          {
+            href: "/crm/chat",
+            label: "Support-Chat",
+            icon: MessageSquareText,
+            tzRef: "§7.2",
+          },
           { href: "/crm/leads", label: "Leads", icon: ClipboardList, tzRef: "§7.3" },
           { href: "/crm/kunden", label: "Kunden", icon: Users, tzRef: "§7.4" },
           { href: "/crm/aufgaben", label: "Aufgaben", icon: ListTodo, tzRef: "§7.8" },

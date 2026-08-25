@@ -153,7 +153,13 @@ Migration: [`012_phone_calls_telephony.sql`](../supabase/migrations/012_phone_ca
 - Live operator: urgent / transfer
 - Twilio stubs on gateway: `/twilio/voice`, `/twilio/status`
 
-Sofort-Projekte remain on `/projekte` (`public.projects` unchanged).
+### CRM ↔ Konfigurator / Website
+
+Migration: [`013_crm_sofort_link.sql`](../supabase/migrations/013_crm_sofort_link.sql)
+
+- Website-Formulare (`/api/public/leads`) legen automatisch Kontakt + Lead an
+- Konfigurator-Submit mit E-Mail verknüpft `projects.contact_id` und zeigt Plan/PDF auf der Kundenkarte
+- `FRONTEND_URL` / `NEXT_PUBLIC_FRONTEND_URL` = Konfigurator-Domain (lokal `:3002`)
 
 ## Документация
 
@@ -168,4 +174,6 @@ Sofort-Projekte remain on `/projekte` (`public.projects` unchanged).
 - [ADR 010 — Scenarios & Test Lab](./docs/adr/010-scenarios-test-lab.md)
 - [ADR 011 — Assistants & Tool Policies](./docs/adr/011-assistants-tool-policies.md)
 - [ADR 012 — Phone Calls & Telephony](./docs/adr/012-phone-calls-telephony.md)
+- [ADR 013 — Telephony runtime](./docs/adr/013-telephony-runtime.md)
+- [ADR 014 — Website + Konfigurator CRM](./docs/adr/014-crm-website-configurator.md)
 - [Voice Gateway README](../voice-gateway/README.md)

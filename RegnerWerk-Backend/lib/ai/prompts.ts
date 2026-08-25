@@ -237,8 +237,11 @@ export async function publishPromptRelease(opts: {
       dependency_snapshot: {
         blocks: compiledBlocks.map((b) => ({
           code: b.code,
+          name: b.name,
+          documentId: b.documentId,
           versionId: b.versionId,
           version: b.version,
+          content: b.content,
         })),
       },
       change_comment: opts.changeComment ?? null,
@@ -266,7 +269,25 @@ export async function getActivePromptRelease(
   return (data as PromptRelease | null) ?? null;
 }
 
-export async function listPromptReleases(limit = 20): Promise<PromptRelease[]> {
+export type PromptReleaseReview = {
+  id: string;
+  release_id: string;
+  author_id: string | null;
+  rating: number | null;
+  comment: string;
+  created_at: string;
+  author_email?: string | null;
+  author_name?: string | null;
+};
+
+export type PromptReleaseListItem = PromptRelease & {
+  avg_rating: number | null;
+  review_count: number;
+};
+
+export async function listPromptReleases(
+  limit = 20,
+): Promise<PromptReleaseListItem[]> {
   const sb = getSupabaseAdmin();
   const { data, error } = await sb
     .from("prompt_releases")
@@ -274,7 +295,206 @@ export async function listPromptReleases(limit = 20): Promise<PromptRelease[]> {
     .order("published_at", { ascending: false })
     .limit(limit);
   if (error) throw new Error(error.message);
-  return (data ?? []) as PromptRelease[];
+  const releases = (data ?? []) as PromptRelease[];
+  if (releases.length === 0) return [];
+
+  const ids = releases.map((r) => r.id);
+  const { data: reviews } = await sb
+    .from("prompt_release_reviews")
+    .select("release_id, rating")
+    .in("release_id", ids);
+
+  const agg = new Map<string, { sum: number; n: number; total: number }>();
+  for (const row of reviews ?? []) {
+    const cur = agg.get(row.release_id) ?? { sum: 0, n: 0, total: 0 };
+    cur.total += 1;
+    if (typeof row.rating === "number") {
+      cur.sum += row.rating;
+      cur.n += 1;
+    }
+    agg.set(row.release_id, cur);
+  }
+
+  return releases.map((r) => {
+    const a = agg.get(r.id);
+    return {
+      ...r,
+      review_count: a?.total ?? 0,
+      avg_rating: a && a.n > 0 ? Math.round((a.sum / a.n) * 10) / 10 : null,
+    };
+  });
+}
+
+export async function getPromptRelease(
+  releaseId: string,
+): Promise<{
+  release: PromptRelease;
+  reviews: PromptReleaseReview[];
+}> {
+  const sb = getSupabaseAdmin();
+  const { data: release, error } = await sb
+    .from("prompt_releases")
+    .select("*")
+    .eq("id", releaseId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!release) throw new Error("Release nicht gefunden");
+
+  const { data: reviews, error: rErr } = await sb
+    .from("prompt_release_reviews")
+    .select("*")
+    .eq("release_id", releaseId)
+    .order("created_at", { ascending: false });
+  if (rErr) throw new Error(rErr.message);
+
+  const authorIds = [
+    ...new Set(
+      (reviews ?? [])
+        .map((r) => r.author_id as string | null)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  ];
+  const profileMap = new Map<string, { display_name?: string }>();
+  if (authorIds.length) {
+    const { data: profiles } = await sb
+      .from("profiles")
+      .select("id, display_name")
+      .in("id", authorIds);
+    for (const p of profiles ?? []) {
+      profileMap.set(p.id, {
+        display_name: p.display_name ?? undefined,
+      });
+    }
+  }
+
+  return {
+    release: release as PromptRelease,
+    reviews: (reviews ?? []).map((r) => {
+      const p = r.author_id ? profileMap.get(r.author_id) : undefined;
+      return {
+        ...(r as PromptReleaseReview),
+        author_email: null,
+        author_name: p?.display_name ?? null,
+      };
+    }),
+  };
+}
+
+export async function addPromptReleaseReview(opts: {
+  releaseId: string;
+  rating?: number | null;
+  comment?: string;
+  userId?: string;
+}): Promise<PromptReleaseReview> {
+  const rating =
+    opts.rating == null || opts.rating === 0
+      ? null
+      : Math.min(5, Math.max(1, Math.round(opts.rating)));
+  const comment = (opts.comment ?? "").trim();
+  if (rating == null && !comment) {
+    throw new Error("Bewertung oder Kommentar erforderlich");
+  }
+
+  const sb = getSupabaseAdmin();
+  const { data, error } = await sb
+    .from("prompt_release_reviews")
+    .insert({
+      release_id: opts.releaseId,
+      author_id: opts.userId ?? null,
+      rating,
+      comment,
+    })
+    .select("*")
+    .single();
+  if (error) throw new Error(error.message);
+  return data as PromptReleaseReview;
+}
+
+/** Load a release's blocks into draft editors (does not activate production). */
+export async function restoreReleaseToDrafts(
+  releaseId: string,
+  userId?: string,
+): Promise<{ restored: number }> {
+  const { release } = await getPromptRelease(releaseId);
+  const snap = release.dependency_snapshot as {
+    blocks?: Array<{
+      documentId?: string;
+      code?: string;
+      content?: string;
+    }>;
+  };
+  const blocks = snap.blocks ?? [];
+  if (!blocks.length) {
+    throw new Error(
+      "Dieses Release hat keinen Block-Snapshot — Rollback (Live) möglich, Entwurf laden nicht.",
+    );
+  }
+
+  const { blocks: studio } = await listPromptStudio();
+  for (const b of blocks) {
+    const content = b.content?.trim();
+    if (!content) continue;
+    let documentId = b.documentId;
+    if (!documentId && b.code) {
+      documentId = studio.find((s) => s.code === b.code)?.id;
+    }
+    if (!documentId) continue;
+    await savePromptDraft({
+      documentId,
+      content,
+      changeNote: `Geladen aus Release ${release.label ?? releaseId.slice(0, 8)}`,
+      userId,
+    });
+  }
+
+  const restored = blocks.filter((b) => b.content?.trim()).length;
+  return { restored };
+}
+
+export async function createPromptDocument(opts: {
+  code: string;
+  name: string;
+  description?: string;
+  content?: string;
+  userId?: string;
+}): Promise<PromptDocument> {
+  const code = opts.code
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_]+/g, "_")
+    .replace(/^_|_$/g, "");
+  if (!code) throw new Error("Code erforderlich");
+  const sb = getSupabaseAdmin();
+  const { data: maxSort } = await sb
+    .from("prompt_documents")
+    .select("sort_order")
+    .order("sort_order", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const { data, error } = await sb
+    .from("prompt_documents")
+    .insert({
+      code,
+      name: opts.name.trim() || code,
+      description: opts.description?.trim() || null,
+      sort_order: (maxSort?.sort_order ?? 0) + 10,
+      required: false,
+      locked: false,
+      active: true,
+    })
+    .select("*")
+    .single();
+  if (error) throw new Error(error.message);
+  const doc = data as PromptDocument;
+  if (opts.content?.trim()) {
+    await savePromptDraft({
+      documentId: doc.id,
+      content: opts.content,
+      changeNote: "Initial draft",
+      userId: opts.userId,
+    });
+  }
+  return doc;
 }
 
 export async function rollbackPromptRelease(
@@ -315,5 +535,13 @@ export async function rollbackPromptRelease(
     .select("*")
     .single();
   if (insErr) throw new Error(insErr.message);
+
+  // Also restore drafts so editor matches live
+  try {
+    await restoreReleaseToDrafts(releaseId, userId);
+  } catch {
+    /* older releases without content snapshot */
+  }
+
   return data as PromptRelease;
 }

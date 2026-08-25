@@ -13,12 +13,26 @@ import type {
 
 type Props = { contactId: string };
 
+type ContactProject = {
+  id: string;
+  created_at: string;
+  status: string;
+  place_label: string;
+  pdf_path: string | null;
+  head_count: number | null;
+  lawn_area_m2: number | null;
+  total_eur: number | null;
+  openUrl: string;
+  pdfUrl: string;
+};
+
 export function CustomerDetail({ contactId }: Props) {
   const [contact, setContact] = useState<Contact | null>(null);
   const [channels, setChannels] = useState<ContactChannel[]>([]);
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [leads, setLeads] = useState<Lead[]>([]);
+  const [projects, setProjects] = useState<ContactProject[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -37,6 +51,7 @@ export function CustomerDetail({ contactId }: Props) {
         setTimeline(data.timeline ?? []);
         setTasks(data.tasks ?? []);
         setLeads(data.leads ?? []);
+        setProjects(data.projects ?? []);
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : "Fehler");
       } finally {
@@ -120,6 +135,55 @@ export function CustomerDetail({ contactId }: Props) {
           </ul>
         </section>
       </div>
+
+      <section className="mt-4 rounded-3xl border border-gray-100 bg-white p-5">
+        <h2 className="text-sm font-bold text-forest">Konfigurator-Projekte</h2>
+        <ul className="mt-3 space-y-3">
+          {projects.map((p) => (
+            <li
+              key={p.id}
+              className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-gray-100 px-3 py-2.5"
+            >
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium text-forest">
+                  {p.place_label || "Ohne Adresse"}
+                </p>
+                <p className="text-[11px] text-gray-400">
+                  {new Date(p.created_at).toLocaleString("de-DE")} · {p.status}
+                  {p.lawn_area_m2 != null
+                    ? ` · ${Math.round(p.lawn_area_m2)} m²`
+                    : ""}
+                </p>
+              </div>
+              <div className="flex gap-2">
+                {p.pdf_path ? (
+                  <a
+                    href={p.pdfUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="rounded-xl border border-gray-200 px-2.5 py-1 text-xs font-medium text-forest hover:bg-mint"
+                  >
+                    PDF
+                  </a>
+                ) : null}
+                <a
+                  href={p.openUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="rounded-xl bg-forest px-2.5 py-1 text-xs font-medium text-white hover:bg-forest/90"
+                >
+                  Konfigurator
+                </a>
+              </div>
+            </li>
+          ))}
+          {projects.length === 0 ? (
+            <li className="text-xs text-gray-400">
+              Noch kein gespeichertes Konfigurator-Projekt
+            </li>
+          ) : null}
+        </ul>
+      </section>
 
       <section className="mt-4 rounded-3xl border border-gray-100 bg-white p-5">
         <h2 className="text-sm font-bold text-forest">Timeline</h2>
