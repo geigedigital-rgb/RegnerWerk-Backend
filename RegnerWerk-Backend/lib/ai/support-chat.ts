@@ -23,6 +23,7 @@ export type HandoffReason = "price" | "uncertain" | "request";
 
 const HANDOFF_RE =
   /\[\[HANDOFF(?::(price|uncertain|request))?\]\]/gi;
+const PLAN_CHOICE_RE = /\[\[PLAN_CHOICE\]\]/gi;
 const CONFIGURATOR_RE = /\[\[CONFIGURATOR\]\]/gi;
 const URL_RE =
   /https?:\/\/\S+|www\.\S+|konfigurator\.regnerwerk\.de\S*/gi;
@@ -68,22 +69,22 @@ Fragen im Chat — VERBOTEN (nur später im Kontaktformular):
 - Telefon, E-Mail, Name (außer er fragt selbst nach Rückruf)
 
 Was du NICHT darfst, solange der Bedarf unklar ist:
-- Keinen Konfigurator, keinen Rückruf, kein Angebot vorschlagen.
-- Niemals URLs oder Domain-Namen schreiben (auch nicht konfigurator.regnerwerk.de).
+- Keinen Konfigurator, keinen Rückruf, kein Angebot, keine Planungs-Wahl vorschlagen.
+- Niemals URLs oder Domain-Namen schreiben.
 
 Gesprächsablauf:
 1. Frage knapp beantworten.
 2. Bei unklarem Bedarf: EINE erlaubte Frage (Ziel / Rasen-Beete / Fläche / neu vs. bestehend).
-3. Konfigurator erst, wenn der Besucher klar planen, bestellen oder selbst konfigurieren will UND du grob weißt, worum es geht (z. B. Neuanlage + Rasen/Fläche). Dann:
-   - kurzer Satz ohne Link
-   - in einer eigenen Zeile genau: [[CONFIGURATOR]]
-   - Die Website zeigt dann eine Schaltfläche — du schreibst keine Links.
-4. Preise: kurz erklären, dass Festpreise erst nach Prüfung gehen (Fläche/Aufwand). Keine PLZ/Wasser-Fragen. Dann Verständnisfrage zum Garten.
+3. Nur wenn das Gespräch klar Richtung Planung / Neuanlage / Bestellen / Berechnen geht UND du grob weißt, worum es geht (z. B. Neuanlage + Rasen/Fläche):
+   - Kurz fragen, ob er selbst rechnen oder eine Berechnung vom Spezialisten möchte — OHNE Links.
+   - In einer eigenen Zeile genau: [[PLAN_CHOICE]]
+   - Die Website zeigt zwei Schaltflächen. Du schreibst keine URLs und keine Button-Texte.
+4. Preise: kurz erklären, dass Festpreise erst nach Prüfung gehen. Keine PLZ/Wasser-Fragen. Dann Verständnisfrage zum Garten — noch kein [[PLAN_CHOICE]], außer er will schon planen/bestellen.
 5. Handoff-Markierung nur:
    - [[HANDOFF:price]] wenn er trotz Erklärung einen konkreten Preis/Angebot will
    - [[HANDOFF:uncertain]] nach 1–2 erlaubten Rückfragen, wenn die Wissensbasis nicht reicht
    - [[HANDOFF:request]] bei explizitem Rückruf/Mensch/Kontakt
-6. Normale Info: keine Markierung, kein Konfigurator.
+6. Normale Info: keine Markierung, keine Plan-Wahl.
 
 ## Wissensbasis
 ${knowledge}`;
@@ -113,7 +114,7 @@ function parseAssistantText(text: string): {
   reply: string;
   needContact: boolean;
   reason: HandoffReason | null;
-  showConfigurator: boolean;
+  showPlanChoice: boolean;
 } {
   let reason: HandoffReason | null = null;
   const matches = [...text.matchAll(HANDOFF_RE)];
@@ -125,12 +126,14 @@ function parseAssistantText(text: string): {
       reason = reason ?? "uncertain";
     }
   }
-  const showConfigurator =
+  const showPlanChoice =
+    /\[\[PLAN_CHOICE\]\]/i.test(text) ||
     /\[\[CONFIGURATOR\]\]/i.test(text) ||
     /konfigurator\.regnerwerk\.de|\/konfigurator/i.test(text);
 
   const reply = text
     .replace(HANDOFF_RE, "")
+    .replace(PLAN_CHOICE_RE, "")
     .replace(CONFIGURATOR_RE, "")
     .replace(URL_RE, "")
     .replace(/\n{3,}/g, "\n\n")
@@ -141,7 +144,7 @@ function parseAssistantText(text: string): {
     reply,
     needContact: matches.length > 0,
     reason,
-    showConfigurator,
+    showPlanChoice,
   };
 }
 
@@ -151,6 +154,8 @@ export async function runSupportChat(
   reply: string;
   need_contact: boolean;
   handoff_reason: HandoffReason | null;
+  show_plan_choice: boolean;
+  /** @deprecated use show_plan_choice */
   show_configurator: boolean;
   model: string;
 }> {
@@ -183,7 +188,8 @@ export async function runSupportChat(
       "Dazu brauche ich kurz das Fachteam — ich erkläre gerne den nächsten Schritt.",
     need_contact: parsed.needContact,
     handoff_reason: reason,
-    show_configurator: parsed.showConfigurator,
+    show_plan_choice: parsed.showPlanChoice,
+    show_configurator: parsed.showPlanChoice,
     model: getGeminiModel(),
   };
 }
